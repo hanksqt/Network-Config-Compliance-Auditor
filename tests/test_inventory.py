@@ -59,6 +59,16 @@ class TestLoading:
 
 
 class TestBackupCommand:
+    def test_every_platform_key_is_a_real_netmiko_driver(self) -> None:
+        """A typo'd key here is invisible: it silently falls back to the generic
+        `show running-config`, which is wrong on most non-Cisco platforms."""
+        from netmiko.ssh_dispatcher import CLASS_MAPPER_BASE
+
+        unknown = sorted(
+            set(inventory.DEFAULT_BACKUP_COMMANDS) - set(CLASS_MAPPER_BASE)
+        )
+        assert not unknown, f"not Netmiko platform names: {unknown}"
+
     def test_platform_default_is_used(self, write_inventory, lab_env) -> None:
         data = base_inventory()
         data["devices"][1]["device_type"] = "juniper_junos"
