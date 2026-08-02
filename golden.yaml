@@ -1,0 +1,95 @@
+# Golden config: what "compliant" means for this network.
+#
+# Rules live here rather than in Python so the same tool can audit lab and
+# production from different files, and so someone who does not write Python can
+# change the standard.
+#
+# Matching:
+#   required / forbidden        exact match on a whitespace-normalized line.
+#                               "ntp server 10.0.0.1" will NOT match a device
+#                               line of "ntp server 10.0.0.1 iburst" -- use a
+#                               regex for that.
+#   required_regex / forbidden_regex
+#                               regex searched against each normalized line.
+#
+# tags: scopes a rule to devices carrying any of those inventory tags.
+# Omit tags to apply the rule everywhere.
+
+defaults:
+  severity: high
+
+rules:
+  # --- Security baseline ----------------------------------------------------
+  - name: AAA root disabled
+    description: >
+      The root account must stay disabled; it bypasses per-user accounting and
+      leaves no audit trail of who made a change.
+    severity: high
+    required:
+      - no aaa root
+
+  - name: Privileged admin account exists
+    description: >
+      At least one privilege-15 network-admin account, or nobody can
+      administer the box after a lockout.
+    severity: high
+    required_regex:
+      - '^username \S+ privilege 15 role network-admin'
+
+  - name: No default SNMP communities
+    description: >
+      public/private are guessable and grant read (or write) access to the
+      whole device. This is the single most common real audit finding.
+    severity: high
+    forbidden_regex:
+      - '^snmp-server community (public|private)\b'
+
+  - name: Telnet disabled
+    description: Telnet is cleartext; management must be SSH only.
+    severity: high
+    forbidden_regex:
+      - '^ip telnet server enable'
+      - '^management telnet'
+
+  - name: No unauthenticated HTTP management
+    description: >
+      The HTTP management API must not be exposed without TLS.
+    severity: medium
+    forbidden_regex:
+      - '^\s*protocol http$'
+
+  # --- Operational baseline -------------------------------------------------
+  - name: Hostname configured
+    description: A device still named "localhost" breaks logging correlation.
+    severity: medium
+    required_regex:
+      - '^hostname \S+'
+
+  - name: Login banner present
+    description: >
+      A login banner is required for legal notice before access. Checked as a
+      regex because the banner text itself varies.
+    severity: low
+    required_regex:
+      - '^banner motd'
+
+  - name: Multi-agent routing model
+    description: >
+      The multi-agent model is the supported one on modern EOS; ribd is
+      deprecated and blocks BGP features.
+    severity: medium
+    required:
+      - service routing protocols model multi-agent
+
+  # --- Role-specific: spines ------------------------------------------------
+  # Demonstrates tag scoping -- this applies only to devices tagged "spine".
+  - name: Spines must route
+    description: >
+      A spine with ip routing disabled is a very expensive switch. Leaves in
+      this topology are intentionally L2, so the rule is scoped by tag.
+    severity: high
+    tags: [spine]
+    required:
+      - ip routing
+    forbidden:
+      - no ip routing

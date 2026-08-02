@@ -15,7 +15,15 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from .models import BackupResult, BackupStatus, Device, DeviceResult, DeviceStatus
+from .models import (
+    BackupResult,
+    BackupStatus,
+    ComplianceResult,
+    Device,
+    DeviceResult,
+    DeviceStatus,
+    Severity,
+)
 
 #: status -> (label, rich style)
 STATUS_STYLE: dict[DeviceStatus, tuple[str, str]] = {
@@ -111,6 +119,108 @@ def render_results_table(
         )
 
     console.print(table)
+
+
+SEVERITY_STYLE: dict[Severity, str] = {
+    Severity.HIGH: "bold red",
+    Severity.MEDIUM: "bold yellow",
+    Severity.LOW: "cyan",
+}
+
+
+def render_compliance_table(
+    results: Sequence[ComplianceResult], console: Console
+) -> None:
+    """One row per device: the at-a-glance answer."""
+    table = Table(title="Compliance check", title_justify="left")
+    table.add_column("Device", style="bold")
+    table.add_column("Result")
+    table.add_column("Rules", justify="right")
+    table.add_column("Violations", justify="right")
+    table.add_column("Detail")
+
+    for result in results:
+        if result.error:
+            status = Text("ERROR", style="bold magenta")
+            detail = result.error
+        elif result.compliant:
+            status = Text("COMPLIANT", style="bold green")
+            detail = ""
+        else:
+            status = Text("NON-COMPLIANT", style="bold red")
+            detail = ", ".join(r.rule_name for r in result.failures)
+
+        table.add_row(
+            result.device.name,
+            status,
+            f"{len(result.evaluated) - len(result.failures)}/{len(result.evaluated)}",
+            str(result.violation_count) or "-",
+            detail,
+        )
+
+    console.print(table)
+
+
+def render_violations(results: Sequence[ComplianceResult], console: Console) -> None:
+    """The actionable part: exactly which lines are wrong, per device."""
+    offenders = [r for r in results if r.failures]
+    if not offenders:
+        return
+
+    console.print()
+    for result in offenders:
+        console.print(Text(result.device.name, style="bold underline"))
+        for rule in result.failures:
+            style = SEVERITY_STYLE.get(rule.severity, "bold red")
+            console.print(
+                Text.assemble(
+                    ("  ✗ ", style),
+                    (rule.rule_name, "bold"),
+                    (f"  [{rule.severity.value}]", style),
+                )
+            )
+            if rule.description:
+                console.print(Text(f"      {rule.description.strip()}", style="dim"))
+            for violation in rule.violations:
+                console.print(f"      - {violation.describe()}")
+        console.print()
+
+
+def render_compliance_summary(
+    results: Sequence[ComplianceResult], console: Console
+) -> None:
+    total = len(results)
+    compliant = sum(1 for r in results if r.compliant)
+    errored = sum(1 for r in results if r.error)
+    failed = total - compliant - errored
+
+    parts = [f"{compliant}/{total} compliant"]
+    if failed:
+        parts.append(f"{failed} with violations")
+    if errored:
+        parts.append(f"{errored} could not be checked")
+
+    console.print(
+        Text.assemble(
+            ("Compliance: ", "bold"),
+            (", ".join(parts), "bold green" if compliant == total else "bold red"),
+        )
+    )
+
+
+def compliance_to_json(results: Sequence[ComplianceResult]) -> dict[str, Any]:
+    total = len(results)
+    compliant = sum(1 for r in results if r.compliant)
+    return {
+        "summary": {
+            "total": total,
+            "compliant": compliant,
+            "non_compliant": total - compliant,
+            "errors": sum(1 for r in results if r.error),
+            "violations": sum(r.violation_count for r in results),
+        },
+        "devices": [r.to_dict() for r in results],
+    }
 
 
 #: backup status -> (label, rich style)

@@ -4,11 +4,11 @@ SSH into your network devices, back up their running configuration, and audit
 each one against a golden baseline defined in YAML — so you find out a switch
 drifted from standard *before* an auditor does.
 
-> **Status: Phases 1–2 of 5 complete**, verified against three Arista cEOS
+> **Status: Phases 1–3 of 5 complete**, verified against three Arista cEOS
 > nodes running under Containerlab. Inventory, connectivity, credential
-> handling, config backup, and the CLI are built and tested. The compliance
-> engine (Phase 3), HTML/Markdown reports (Phase 4), and the scheduled
-> compliance workflow (Phase 5) are next. See [Roadmap](#roadmap).
+> handling, config backup, and the compliance engine are built and tested.
+> HTML/Markdown reports (Phase 4) and the scheduled compliance workflow
+> (Phase 5) are next. See [Roadmap](#roadmap).
 
 ## The problem
 
@@ -82,6 +82,19 @@ Summary: 2/3 reachable, 1 failed
   truncated, or an error string is `REJECTED` and nothing is written
 - **Optional `--git-commit`** to version config history; a failed commit never
   turns a successful backup into a failed run
+
+**Built (Phase 3)**
+
+- **Golden rules in YAML** — `required` / `forbidden` lines plus regex variants,
+  with per-rule severity and descriptions that appear in the report
+- **Rules scoped by inventory tag**, so `spine`-only rules don't need a separate file
+- **Violations name the offending line and its line number**, not just "device failed"
+- **Audits the latest backup by default** (reproducible, no network, CI-friendly);
+  `--check --live` audits the devices' current config instead
+- **Unknown never reads as compliant** — a device with no backup, or one that
+  couldn't be reached, is reported as an error rather than a pass
+- **Rule files are validated strictly** — a rule that defines no checks is a
+  load error, because it would pass silently and look fine in the report
 
 **Planned** — see [Roadmap](#roadmap).
 
@@ -172,6 +185,24 @@ Version that history in git:
 python auditor.py --backup --git-commit
 ```
 
+Audit every device against the golden config:
+
+```bash
+python auditor.py --check
+```
+
+```console
+│ ceos-spine1 │ NON-COMPLIANT │ 7/9 │ 3 │ Spines must route, Login banner present │
+│ ceos-leaf1  │ COMPLIANT     │ 8/8 │ 0 │                                         │
+
+ceos-spine1
+  ✗ Spines must route  [high]
+      - missing: ip routing
+      - forbidden: no ip routing (line 38)
+```
+
+That exits non-zero, which is what lets CI fail a build on drift.
+
 Slice the fleet, tune concurrency, get machine-readable output:
 
 ```bash
@@ -222,9 +253,12 @@ netauditor/
   runner.py             # thread pool across devices
   backup.py             # timestamped writes, change detection, sanity checks
   gitstore.py           # optional git commit of new backups
+  golden.py             # golden.yaml parsing + strict validation
+  compliance.py         # rule evaluation, violation reporting
   report.py             # console tables + JSON
   models.py             # Device, DeviceResult, DeviceStatus
 inventory.yaml          # devices (no secrets)
+golden.yaml             # what "compliant" means
 lab/                    # Containerlab topology + Phase 0 instructions
 tests/
 ```
@@ -259,6 +293,27 @@ device just happened to answer with a refusal. `output_problem()` now inspects
 what came back, so a rejection is `COMMAND_FAILED` rather than a one-line file
 that Phase 3 would cheerfully audit against golden rules. Every layer that only
 checks *transport* success has this hole in it.
+
+**Why rule matching is exact, not substring.** `required: ["ip routing"]`
+matches a config line of `ip routing` (or `   ip routing` — indentation and
+repeated spaces are normalized away) but *not* `ip routing ipv6`. Substring
+matching would be friendlier right up until `forbidden: ["ip http server"]` is
+satisfied by a comment mentioning it, or a banner quoting it. In a compliance
+tool the expensive failure is a rule that silently passes, so matching is
+exact, and `required_regex` / `forbidden_regex` handle everything else
+explicitly. A rule either matches what you meant or visibly does not.
+
+**Why a rule with no checks is a load error.** `golden.py` rejects a rule that
+defines none of `required`/`forbidden`/`required_regex`/`forbidden_regex`, and
+rejects unknown keys like `forbiden`. Both would otherwise produce a rule that
+always passes — which is indistinguishable, in the report, from a rule that
+genuinely passed. Regexes are compiled at load for the same reason: fail at
+startup, not halfway through an audit.
+
+**Why unreachable means non-compliant.** A device with no backup to audit, or
+one that couldn't be collected, is reported as an error and counted against the
+run. It would be easy to skip those and report "3/3 compliant" from two
+devices, which is how a compliance report becomes a lie.
 
 **Why the lab's backups are committed, and why yours might not be.** `backups/`
 contains real captures from the Containerlab topology, including
@@ -296,7 +351,7 @@ honest fit for a blocking library.
 - [x] **Phase 0** — Containerlab topology, three cEOS nodes reachable over SSH
 - [x] **Phase 1** — inventory, credentials, connectivity, error handling, CLI
 - [x] **Phase 2** — back up configs to `backups/<hostname>/<timestamp>.cfg`, optional git commit
-- [ ] **Phase 3** — compliance engine: `required` / `forbidden` / regex rules in YAML
+- [x] **Phase 3** — compliance engine: `required` / `forbidden` / regex rules in YAML
 - [ ] **Phase 4** — HTML and Markdown reports alongside the console output
 - [ ] **Phase 5** — scheduled GitHub Actions compliance run that fails on drift
 

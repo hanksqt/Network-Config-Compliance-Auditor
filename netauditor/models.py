@@ -109,6 +109,125 @@ class Device:
         return params
 
 
+class Severity(str, Enum):
+    """How much a failed rule matters. Drives report ordering and exit codes."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+    @property
+    def rank(self) -> int:
+        return {"high": 0, "medium": 1, "low": 2}[self.value]
+
+
+class RuleStatus(str, Enum):
+    PASS = "pass"
+    FAIL = "fail"
+    #: Rule does not apply to this device (tag scoping).
+    NOT_APPLICABLE = "not_applicable"
+
+
+@dataclass(frozen=True)
+class Violation:
+    """One specific reason a rule failed, naming the line involved."""
+
+    #: "missing" (required line absent) or "forbidden" (banned line present)
+    kind: str
+    #: The pattern from the golden file.
+    expected: str
+    #: The offending config line, for forbidden matches.
+    found: str | None = None
+    #: 1-indexed line number in the config, for forbidden matches.
+    line_number: int | None = None
+
+    def describe(self) -> str:
+        if self.kind == "missing":
+            return f"missing: {self.expected}"
+        location = f" (line {self.line_number})" if self.line_number else ""
+        return f"forbidden: {self.found or self.expected}{location}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "expected": self.expected,
+            "found": self.found,
+            "line_number": self.line_number,
+        }
+
+
+@dataclass
+class RuleResult:
+    """Outcome of evaluating one rule against one device."""
+
+    rule_name: str
+    status: RuleStatus
+    severity: Severity = Severity.HIGH
+    violations: tuple[Violation, ...] = ()
+    description: str | None = None
+
+    @property
+    def failed(self) -> bool:
+        return self.status is RuleStatus.FAIL
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rule": self.rule_name,
+            "status": self.status.value,
+            "severity": self.severity.value,
+            "description": self.description,
+            "violations": [v.to_dict() for v in self.violations],
+        }
+
+
+@dataclass
+class ComplianceResult:
+    """Every rule evaluated against one device."""
+
+    device: Device
+    results: list[RuleResult] = field(default_factory=list)
+    #: Set when the config could not be obtained at all.
+    error: str | None = None
+    #: Where the audited config came from, for reproducibility.
+    source: str | None = None
+
+    @property
+    def evaluated(self) -> list[RuleResult]:
+        return [r for r in self.results if r.status is not RuleStatus.NOT_APPLICABLE]
+
+    @property
+    def failures(self) -> list[RuleResult]:
+        """Failed rules, most severe first."""
+        return sorted(
+            (r for r in self.results if r.failed),
+            key=lambda r: r.severity.rank,
+        )
+
+    @property
+    def compliant(self) -> bool:
+        """A device with no config to audit is not compliant -- it is unknown,
+        and unknown must not read as a pass."""
+        return self.error is None and not self.failures
+
+    @property
+    def violation_count(self) -> int:
+        return sum(len(r.violations) for r in self.failures)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "device": self.device.name,
+            "host": self.device.host,
+            "tags": list(self.device.tags),
+            "compliant": self.compliant,
+            "error": self.error,
+            "source": self.source,
+            "rules_evaluated": len(self.evaluated),
+            "rules_failed": len(self.failures),
+            "violations": self.violation_count,
+            "results": [r.to_dict() for r in self.results],
+        }
+
+
 class BackupStatus(str, Enum):
     """Outcome of writing one device's config to disk."""
 

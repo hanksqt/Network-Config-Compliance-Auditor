@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from . import __version__, backup, gitstore, inventory, report, runner
+from . import __version__, backup, compliance, gitstore, golden, inventory, report, runner
 from .errors import AuditorError, CredentialError, InventoryError
 from .models import BackupStatus
 
@@ -28,6 +28,7 @@ EXIT_INTERRUPTED = 130
 
 DEFAULT_INVENTORY = "inventory.yaml"
 DEFAULT_BACKUP_DIR = "backups"
+DEFAULT_GOLDEN = "golden.yaml"
 
 
 def _split_csv(values: Sequence[str] | None) -> list[str]:
@@ -77,6 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--backup",
         action="store_true",
         help="collect each device's running config and write it to --backup-dir",
+    )
+    action.add_argument(
+        "-k",
+        "--check",
+        action="store_true",
+        help="audit each device against the golden config; exit 1 on any violation",
     )
 
     source = parser.add_argument_group("device selection")
@@ -150,6 +157,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--git-commit",
         action="store_true",
         help="git-commit newly written backups, giving configs a change history",
+    )
+
+    check_group = parser.add_argument_group("compliance (--check only)")
+    check_group.add_argument(
+        "-g",
+        "--golden",
+        default=DEFAULT_GOLDEN,
+        metavar="PATH",
+        help=f"golden config rules (default: {DEFAULT_GOLDEN})",
+    )
+    check_group.add_argument(
+        "--live",
+        action="store_true",
+        help=(
+            "SSH to the devices and audit their current config, instead of "
+            "auditing the most recent backup"
+        ),
     )
 
     out = parser.add_argument_group("output")
@@ -283,7 +307,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             report.render_device_table(devices, console)
         return EXIT_OK
 
-    # --test-connection / --backup: both collect first.
+    # --check reads backups off disk by default, so it needs no network at all.
+    if args.check and not args.live:
+        try:
+            rules = golden.load_golden(args.golden)
+        except AuditorError as exc:
+            err_console.print(f"[bold red]error:[/] {exc}")
+            return EXIT_CONFIG_ERROR
+        audited = compliance.audit_from_backups(devices, rules, args.backup_dir)
+        return _report_compliance(args, audited, console)
+
+    # Everything else collects from the devices first.
     commands = _split_csv(args.command) or None
 
     try:
@@ -301,6 +335,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.backup:
         return _run_backup(args, results, console, err_console)
 
+    if args.check:  # --check --live
+        try:
+            rules = golden.load_golden(args.golden)
+        except AuditorError as exc:
+            err_console.print(f"[bold red]error:[/] {exc}")
+            return EXIT_CONFIG_ERROR
+        return _report_compliance(
+            args, compliance.audit_from_results(results, rules), console
+        )
+
     if args.json:
         print(
             report.dump_json(
@@ -312,6 +356,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         report.render_summary(results, console)
 
     return EXIT_OK if all(r.ok for r in results) else EXIT_DEVICE_FAILURE
+
+
+def _report_compliance(args, audited, console) -> int:
+    """Render the audit and pick the exit code.
+
+    Non-zero on any violation is the point: it is what lets a scheduled CI job
+    fail the build when a device drifts.
+    """
+    if args.json:
+        print(report.dump_json(report.compliance_to_json(audited)))
+    else:
+        report.render_compliance_table(audited, console)
+        report.render_violations(audited, console)
+        report.render_compliance_summary(audited, console)
+
+    return EXIT_OK if all(r.compliant for r in audited) else EXIT_DEVICE_FAILURE
 
 
 def _run_backup(args, results, console, err_console) -> int:
