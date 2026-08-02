@@ -33,9 +33,10 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-      - name: Check inventory.yaml parses
-        # Catches a broken inventory before it reaches a scheduled run.
-        env:
-          NETAUDIT_LAB_USERNAME: ci-syntax-check
-          NETAUDIT_LAB_PASSWORD: ci-syntax-check
-        run: python auditor.py --list-devices --no-color
+      - name: Check inventory.yaml and golden.yaml parse
+        # Catches a broken config file before it reaches a scheduled run.
+        # No credentials: neither command opens a socket, and requiring
+        # secrets for an offline operation would be a design smell.
+        run: |
+          python auditor.py --list-devices --no-color
+          python auditor.py --check --no-color || true

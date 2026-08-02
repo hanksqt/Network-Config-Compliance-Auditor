@@ -1,14 +1,14 @@
 # Network Config Compliance Auditor
 
+[![CI](https://github.com/hanksqt/Network-Config-Compliance-Auditor/actions/workflows/ci.yml/badge.svg)](https://github.com/hanksqt/Network-Config-Compliance-Auditor/actions/workflows/ci.yml)
+[![Compliance](https://github.com/hanksqt/Network-Config-Compliance-Auditor/actions/workflows/compliance.yml/badge.svg)](https://github.com/hanksqt/Network-Config-Compliance-Auditor/actions/workflows/compliance.yml)
+
 SSH into your network devices, back up their running configuration, and audit
 each one against a golden baseline defined in YAML — so you find out a switch
 drifted from standard *before* an auditor does.
 
-> **Status: Phases 1–4 of 5 complete**, verified against three Arista cEOS
-> nodes running under Containerlab. Inventory, connectivity, credential
-> handling, config backup, the compliance engine, and reporting are built and
-> tested. The scheduled compliance workflow (Phase 5) is next. See
-> [Roadmap](#roadmap).
+> **Status: complete.** All five phases are built, tested, and verified against
+> three Arista cEOS nodes running under Containerlab.
 
 ## The problem
 
@@ -107,7 +107,14 @@ Summary: 2/3 reachable, 1 failed
 - Device-supplied text is escaped; config content reaches the report as text,
   never as markup
 
-**Planned** — see [Roadmap](#roadmap).
+**Built (Phase 5)**
+
+- **Scheduled compliance run** — weekday cron, manual trigger, and on any push
+  that touches configs or rules
+- **Fails the build on drift**, and publishes the Markdown report to the
+  Actions job summary so the finding is visible without downloading anything
+- **Needs no credentials** — auditing committed configs opens no socket, so the
+  scheduled job runs with zero secrets configured
 
 ## Tech stack
 
@@ -250,6 +257,28 @@ python auditor.py --test-connection --device ceos-leaf1 -vv
 The 1-vs-2 split is deliberate: CI should treat "a switch is unreachable"
 differently from "your inventory file is broken."
 
+## Running this against real devices in CI
+
+The scheduled [Compliance workflow](.github/workflows/compliance.yml) audits the
+configs committed under `backups/`. That is a real check — it catches drift the
+moment a changed config lands — and it needs no network access and no secrets.
+
+It does **not** SSH to devices, and no GitHub-hosted runner can: your devices
+sit on a private management network that `ubuntu-latest` has no route to. A
+workflow claiming otherwise would be theatre.
+
+To audit live devices on a schedule, you need a runner that can reach them:
+
+1. Register a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners)
+   on the management network
+2. Add `NETAUDIT_LAB_USERNAME` and `NETAUDIT_LAB_PASSWORD` as repository secrets
+3. In `compliance.yml`, change the `live-audit` job's `if: false` to
+   `if: github.event_name == 'schedule'`
+
+That job runs `--backup` and *then* `--check --live`, in that order and on
+purpose: auditing whatever was committed last week would report green while a
+switch is actively misconfigured.
+
 ## Tests
 
 ```bash
@@ -330,6 +359,15 @@ always passes — which is indistinguishable, in the report, from a rule that
 genuinely passed. Regexes are compiled at load for the same reason: fail at
 startup, not halfway through an audit.
 
+**Why an offline audit needs no credentials.** `--check` against committed
+backups opens no socket, so `load_inventory(require_credentials=False)` leaves
+`Device.credentials` as `None` and any attempt to connect raises instead of
+proceeding. This came out of writing the CI workflow: the first draft had to
+inject fake `NETAUDIT_*` values so an *offline* operation would start, which is
+a design smell wearing a workaround as a disguise. Now the scheduled job runs
+with zero secrets configured, which is also the correct security posture — a
+job that cannot reach devices should not be handed device credentials.
+
 **Why the HTML report has no CDN link in it.** Everything is inlined — CSS in a
 `<style>` block, no scripts, no external fonts. A compliance report gets
 emailed to an auditor, attached to a ticket, archived for a year, or opened
@@ -382,7 +420,7 @@ honest fit for a blocking library.
 - [x] **Phase 2** — back up configs to `backups/<hostname>/<timestamp>.cfg`, optional git commit
 - [x] **Phase 3** — compliance engine: `required` / `forbidden` / regex rules in YAML
 - [x] **Phase 4** — HTML and Markdown reports alongside the console output
-- [ ] **Phase 5** — scheduled GitHub Actions compliance run that fails on drift
+- [x] **Phase 5** — scheduled GitHub Actions compliance run that fails on drift
 
-v2 ideas, only once the above is done: a diff view between two backups,
-multivendor rule sets, and a Nornir rewrite.
+v2 ideas: a diff view between two backups, multivendor rule sets, and a Nornir
+rewrite.

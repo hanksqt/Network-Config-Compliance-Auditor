@@ -282,9 +282,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.retries < 1:
         parser.error("--retries must be at least 1")
 
+    # Listing the inventory and auditing a committed backup never open a
+    # socket, so they must not demand SSH secrets. This is what lets the
+    # scheduled compliance run work on a runner with no credentials at all.
+    needs_credentials = bool(args.test_connection or args.backup or args.live)
+
     try:
         load_env_file(args.env_file)
-        devices = inventory.load_inventory(args.inventory)
+        devices = inventory.load_inventory(
+            args.inventory, require_credentials=needs_credentials
+        )
         devices = inventory.filter_devices(
             devices,
             names=_split_csv(args.device),

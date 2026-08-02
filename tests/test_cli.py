@@ -156,15 +156,80 @@ class TestFiltering:
         assert code == cli.EXIT_CONFIG_ERROR
 
 
+class TestOfflineOperations:
+    """Operations that open no socket must not demand SSH secrets.
+
+    This is what lets the scheduled compliance run work on a CI runner with no
+    credentials configured at all, instead of injecting fake ones.
+    """
+
+    def test_list_devices_needs_no_credentials(
+        self, inventory_path, monkeypatch, capsys
+    ) -> None:
+        monkeypatch.delenv("NETAUDIT_LAB_USERNAME", raising=False)
+        monkeypatch.delenv("NETAUDIT_LAB_PASSWORD", raising=False)
+
+        assert cli.main(["--list-devices", "-i", str(inventory_path)]) == cli.EXIT_OK
+        assert "spine1" in capsys.readouterr().out
+
+    def test_check_from_backups_needs_no_credentials(
+        self, inventory_path, tmp_path, monkeypatch, capsys
+    ) -> None:
+        monkeypatch.delenv("NETAUDIT_LAB_USERNAME", raising=False)
+        monkeypatch.delenv("NETAUDIT_LAB_PASSWORD", raising=False)
+
+        golden = tmp_path / "golden.yaml"
+        golden.write_text(
+            yaml.safe_dump(
+                {"rules": [{"name": "aaa", "required": ["no aaa root"]}]},
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        for name in ("spine1", "leaf1"):
+            device_dir = tmp_path / "backups" / name
+            device_dir.mkdir(parents=True)
+            (device_dir / "20260802T000000Z.cfg").write_text(
+                "no aaa root\nhostname " + name + "\n", encoding="utf-8"
+            )
+
+        code = cli.main(
+            [
+                "--check",
+                "-i",
+                str(inventory_path),
+                "-g",
+                str(golden),
+                "--backup-dir",
+                str(tmp_path / "backups"),
+                "--no-color",
+            ]
+        )
+        assert code == cli.EXIT_OK
+        assert "COMPLIANT" in capsys.readouterr().out
+
+    def test_connecting_without_credentials_raises(self, device) -> None:
+        """A device loaded offline must refuse to connect, not connect wrongly."""
+        from dataclasses import replace
+
+        from netauditor.errors import CredentialError
+
+        offline = replace(device, credentials=None)
+        with pytest.raises(CredentialError, match="no credentials resolved"):
+            offline.netmiko_params()
+
+
 class TestErrorHandling:
     def test_missing_inventory(self, tmp_path, capsys) -> None:
         code = cli.main(["--list-devices", "-i", str(tmp_path / "nope.yaml")])
         assert code == cli.EXIT_CONFIG_ERROR
         assert "not found" in capsys.readouterr().err
 
-    def test_missing_credentials(self, inventory_path, monkeypatch, capsys) -> None:
+    def test_missing_credentials_blocks_connecting(
+        self, inventory_path, monkeypatch, capsys
+    ) -> None:
         monkeypatch.delenv("NETAUDIT_LAB_PASSWORD", raising=False)
-        code = cli.main(["--list-devices", "-i", str(inventory_path)])
+        code = cli.main(["--test-connection", "-i", str(inventory_path)])
         assert code == cli.EXIT_CONFIG_ERROR
         assert "NETAUDIT_LAB_PASSWORD" in capsys.readouterr().err
 

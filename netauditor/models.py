@@ -64,7 +64,10 @@ class Device:
     name: str
     host: str
     device_type: str
-    credentials: Credentials = field(repr=False)
+    #: ``None`` when the inventory was loaded without resolving credentials --
+    #: auditing a committed backup opens no socket, so it must not require
+    #: secrets. Any attempt to connect raises rather than silently proceeding.
+    credentials: Credentials | None = field(default=None, repr=False)
     port: int = 22
     tags: tuple[str, ...] = ()
     # Command whose output is treated as the running config for this platform.
@@ -81,7 +84,19 @@ class Device:
         return f"{self.name} ({self.host}:{self.port})"
 
     def netmiko_params(self) -> dict[str, Any]:
-        """Build the kwargs for ``netmiko.ConnectHandler``."""
+        """Build the kwargs for ``netmiko.ConnectHandler``.
+
+        Raises:
+            CredentialError: if the inventory was loaded without credentials.
+        """
+        if self.credentials is None:
+            from .errors import CredentialError
+
+            raise CredentialError(
+                f"device {self.name!r} has no credentials resolved; "
+                f"the inventory was loaded for offline use only"
+            )
+
         params: dict[str, Any] = {
             "device_type": self.device_type,
             "host": self.host,

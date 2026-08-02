@@ -28,7 +28,7 @@ import yaml
 
 from . import credentials as creds
 from .errors import CredentialError, InventoryError
-from .models import Device
+from .models import Credentials, Device
 
 log = logging.getLogger(__name__)
 
@@ -130,15 +130,24 @@ def load_inventory(
     path: str | Path,
     *,
     env: Mapping[str, str] | None = None,
+    require_credentials: bool = True,
 ) -> list[Device]:
-    """Load ``inventory.yaml`` and return fully-resolved devices.
+    """Load ``inventory.yaml`` and return devices.
 
-    Credentials are resolved here so that a missing secret fails immediately at
-    startup rather than halfway through a run.
+    Credentials are resolved up front so that a missing secret fails at startup
+    rather than halfway through a run.
+
+    Args:
+        require_credentials: set ``False`` for operations that never open a
+            socket -- auditing a committed backup, or listing the inventory.
+            Devices come back with ``credentials=None`` and raise if anything
+            later tries to connect. Without this, an offline audit in CI would
+            need SSH secrets injected for no reason.
 
     Raises:
         InventoryError: file missing, malformed, or schema-invalid.
-        CredentialError: a device's credentials are not in the environment.
+        CredentialError: a device's credentials are not in the environment
+            (only when ``require_credentials``).
     """
     data = load_raw(path)
 
@@ -189,6 +198,7 @@ def load_inventory(
         profile = merged.get("credentials")
         profile = str(profile).strip() if profile else None
 
+        resolved: Credentials | None
         try:
             resolved = creds.resolve(
                 name,
@@ -197,8 +207,11 @@ def load_inventory(
                 key_file=merged.get("key_file"),
             )
         except CredentialError as exc:
-            # Re-raise with the inventory location attached.
-            raise CredentialError(f"{what}: {exc}") from exc
+            if require_credentials:
+                # Re-raise with the inventory location attached.
+                raise CredentialError(f"{what}: {exc}") from exc
+            log.debug("%s: credentials unresolved (offline mode): %s", name, exc)
+            resolved = None
 
         backup_command = merged.get("backup_command") or DEFAULT_BACKUP_COMMANDS.get(
             device_type, FALLBACK_BACKUP_COMMAND
