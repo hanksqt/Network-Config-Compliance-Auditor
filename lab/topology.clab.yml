@@ -10,7 +10,10 @@
 # image, which is a much longer road to the same result.
 #
 # Import the image once before deploying:
-#   docker import cEOS64-lab-4.32.0F.tar ceos:4.32.0F
+#   docker import cEOS64-lab-4.33.9M.tar ceos:4.33.9M
+#
+# 4.33.9M is the newest maintenance ("M") release of the 4.33 train — the most
+# bug fixes behind it, and a train containerlab has been run against heavily.
 #
 # No `startup-config` is set on purpose: containerlab's built-in cEOS config
 # already assigns the management IP, enables SSH, and creates a privilege-15
@@ -26,7 +29,7 @@ mgmt:
 topology:
   kinds:
     ceos:
-      image: ceos:4.32.0F
+      image: ceos:4.33.9M
 
   nodes:
     ceos-spine1:
