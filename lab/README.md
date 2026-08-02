@@ -18,19 +18,32 @@ bash -c "$(curl -sL https://get.containerlab.dev)"
 
 From [arista.com/support/software-download](https://www.arista.com/en/support/software-download)
 (free account required): **Software Download → cEOS Lab → 4.33 → EOS-4.33.9M**,
-and take `cEOS64-lab-4.33.9M.tar`.
+and take `cEOS64-lab-4.33.9M.tar.xz`.
 
-Watch the filename. There is a 32-bit `cEOS-lab-` variant sitting next to the
-64-bit one, and you want the plain `.tar` — not `.tar.xz`, not a vmdk.
+Two things to get right in that folder:
 
-The download lands on the Windows side; WSL reads it under `/mnt/c`:
+- **`cEOS64`**, not `cEOS` — the 32-bit build sits directly above it in the list
+- the `.tar.xz` itself, not its `.md5sum`, `.sha512sum`, `.cms.pem`, or `.json`
+  companions (checksums and code-signing artifacts, none of which Docker wants)
+
+If the portal shows a restriction banner, read it to the end: guest accounts
+without a support contract are still granted cEOS and vEOS downloads.
+
+The download lands on the Windows side; WSL reads it under `/mnt/c`. Docker
+decompresses xz on the way in, so there is no need to unpack it first:
 
 ```bash
-docker import /mnt/c/Users/hshih/Downloads/cEOS64-lab-4.33.9M.tar ceos:4.33.9M
+docker import /mnt/c/Users/hshih/Downloads/cEOS64-lab-4.33.9M.tar.xz ceos:4.33.9M
 ```
 
-Confirm it registered before deploying — a typo here surfaces later as a
-confusing containerlab hang rather than a clear "no such image":
+If that errors on the compression, decompress and import the plain tar:
+
+```bash
+unxz /mnt/c/Users/hshih/Downloads/cEOS64-lab-4.33.9M.tar.xz
+```
+
+Confirm the image registered before deploying — a bad import surfaces later as
+a confusing containerlab hang rather than a clear "no such image":
 
 ```bash
 docker images | grep ceos
