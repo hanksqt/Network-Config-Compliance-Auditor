@@ -4,11 +4,11 @@ SSH into your network devices, back up their running configuration, and audit
 each one against a golden baseline defined in YAML — so you find out a switch
 drifted from standard *before* an auditor does.
 
-> **Status: Phases 1–3 of 5 complete**, verified against three Arista cEOS
+> **Status: Phases 1–4 of 5 complete**, verified against three Arista cEOS
 > nodes running under Containerlab. Inventory, connectivity, credential
-> handling, config backup, and the compliance engine are built and tested.
-> HTML/Markdown reports (Phase 4) and the scheduled compliance workflow
-> (Phase 5) are next. See [Roadmap](#roadmap).
+> handling, config backup, the compliance engine, and reporting are built and
+> tested. The scheduled compliance workflow (Phase 5) is next. See
+> [Roadmap](#roadmap).
 
 ## The problem
 
@@ -95,6 +95,17 @@ Summary: 2/3 reachable, 1 failed
   couldn't be reached, is reported as an error rather than a pass
 - **Rule files are validated strictly** — a rule that defines no checks is a
   load error, because it would pass silently and look fine in the report
+
+**Built (Phase 4)**
+
+- **HTML and Markdown reports** via `--report path.html` / `.md` / `.json`,
+  format chosen by the extension
+- **Self-contained HTML** — inline CSS, no CDN, no scripts, so the report still
+  works emailed, archived, or opened on a management network with no internet
+- **Markdown renders natively on GitHub**, so it drops straight into a ticket,
+  a PR comment, or an Actions job summary — [sample](docs/sample-report.md)
+- Device-supplied text is escaped; config content reaches the report as text,
+  never as markup
 
 **Planned** — see [Roadmap](#roadmap).
 
@@ -203,6 +214,14 @@ ceos-spine1
 
 That exits non-zero, which is what lets CI fail a build on drift.
 
+Export the report — extension picks the format:
+
+```bash
+python auditor.py --check --report reports/compliance.html
+```
+
+See [docs/sample-report.md](docs/sample-report.md) for real output.
+
 Slice the fleet, tune concurrency, get machine-readable output:
 
 ```bash
@@ -255,6 +274,7 @@ netauditor/
   gitstore.py           # optional git commit of new backups
   golden.py             # golden.yaml parsing + strict validation
   compliance.py         # rule evaluation, violation reporting
+  render.py             # HTML + Markdown report generation
   report.py             # console tables + JSON
   models.py             # Device, DeviceResult, DeviceStatus
 inventory.yaml          # devices (no secrets)
@@ -310,6 +330,15 @@ always passes — which is indistinguishable, in the report, from a rule that
 genuinely passed. Regexes are compiled at load for the same reason: fail at
 startup, not halfway through an audit.
 
+**Why the HTML report has no CDN link in it.** Everything is inlined — CSS in a
+`<style>` block, no scripts, no external fonts. A compliance report gets
+emailed to an auditor, attached to a ticket, archived for a year, or opened
+from a jump host on a management network with no internet route. Any of those
+break a report that fetches a stylesheet at render time, and it breaks *later*,
+when nobody is around to notice. Same reason config text is HTML-escaped:
+device output ends up in the report, so it has to arrive as text rather than as
+markup.
+
 **Why unreachable means non-compliant.** A device with no backup to audit, or
 one that couldn't be collected, is reported as an error and counted against the
 run. It would be easy to skip those and report "3/3 compliant" from two
@@ -352,7 +381,7 @@ honest fit for a blocking library.
 - [x] **Phase 1** — inventory, credentials, connectivity, error handling, CLI
 - [x] **Phase 2** — back up configs to `backups/<hostname>/<timestamp>.cfg`, optional git commit
 - [x] **Phase 3** — compliance engine: `required` / `forbidden` / regex rules in YAML
-- [ ] **Phase 4** — HTML and Markdown reports alongside the console output
+- [x] **Phase 4** — HTML and Markdown reports alongside the console output
 - [ ] **Phase 5** — scheduled GitHub Actions compliance run that fails on drift
 
 v2 ideas, only once the above is done: a diff view between two backups,

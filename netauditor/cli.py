@@ -15,7 +15,17 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from . import __version__, backup, compliance, gitstore, golden, inventory, report, runner
+from . import (
+    __version__,
+    backup,
+    compliance,
+    gitstore,
+    golden,
+    inventory,
+    render,
+    report,
+    runner,
+)
 from .errors import AuditorError, CredentialError, InventoryError
 from .models import BackupStatus
 
@@ -54,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python auditor.py --test-connection\n"
             "  python auditor.py --backup\n"
             "  python auditor.py --backup --git-commit\n"
+            "  python auditor.py --check --report reports/compliance.html\n"
             "  python auditor.py --test-connection --tag lab --json\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -173,6 +184,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "SSH to the devices and audit their current config, instead of "
             "auditing the most recent backup"
+        ),
+    )
+    check_group.add_argument(
+        "--report",
+        metavar="PATH",
+        help=(
+            "also write the report to a file; format comes from the extension "
+            "(.html, .md, .json)"
         ),
     )
 
@@ -358,12 +377,52 @@ def main(argv: Sequence[str] | None = None) -> int:
     return EXIT_OK if all(r.ok for r in results) else EXIT_DEVICE_FAILURE
 
 
+#: report file extension -> renderer
+REPORT_RENDERERS = {
+    ".html": render.to_html,
+    ".htm": render.to_html,
+    ".md": render.to_markdown,
+    ".markdown": render.to_markdown,
+}
+
+
+def _write_report(path_str: str, audited) -> Path:
+    """Write the audit to a file, choosing the format from the extension."""
+    path = Path(path_str)
+    suffix = path.suffix.lower()
+
+    if suffix == ".json":
+        text = report.dump_json(report.compliance_to_json(audited))
+    else:
+        renderer = REPORT_RENDERERS.get(suffix)
+        if renderer is None:
+            raise InventoryError(
+                f"cannot infer report format from {path.name!r}. "
+                f"Use one of: {', '.join(sorted({*REPORT_RENDERERS, '.json'}))}"
+            )
+        text = renderer(audited)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
+
+
 def _report_compliance(args, audited, console) -> int:
     """Render the audit and pick the exit code.
 
     Non-zero on any violation is the point: it is what lets a scheduled CI job
     fail the build when a device drifts.
     """
+    if args.report:
+        try:
+            written = _write_report(args.report, audited)
+        except (InventoryError, OSError) as exc:
+            # The audit itself succeeded; report the write failure without
+            # discarding the result.
+            console.print(f"[bold red]could not write report:[/] {exc}")
+            return EXIT_CONFIG_ERROR
+        console.print(f"[bold]Report:[/] {written}")
+
     if args.json:
         print(report.dump_json(report.compliance_to_json(audited)))
     else:
