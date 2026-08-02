@@ -14,6 +14,7 @@ __pycache__/
 build/
 dist/
 .venv/
+.venv-linux/   # WSL-side venv; the lab is only reachable from inside WSL
 venv/
 env/
 .pytest_cache/
