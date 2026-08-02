@@ -64,7 +64,7 @@ DEFAULT_BACKUP_COMMANDS: dict[str, str] = {
     "cisco_nxos": "show running-config",
     "cisco_asa": "show running-config",
     "juniper_junos": "show configuration | display set",
-    "nokia_srlinux": "info",
+    "nokia_srl": "info",
     "linux": "cat /etc/network/interfaces",
 }
 
