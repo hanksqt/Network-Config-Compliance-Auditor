@@ -16,14 +16,28 @@ bash -c "$(curl -sL https://get.containerlab.dev)"
 
 ## 2. Get the cEOS image
 
-Download `cEOS64-lab-<version>.tar` from [arista.com/support/software-download](https://www.arista.com/en/support/software-download)
-(free account required), then:
+From [arista.com/support/software-download](https://www.arista.com/en/support/software-download)
+(free account required): **Software Download → cEOS Lab → 4.33 → EOS-4.33.9M**,
+and take `cEOS64-lab-4.33.9M.tar`.
+
+Watch the filename. There is a 32-bit `cEOS-lab-` variant sitting next to the
+64-bit one, and you want the plain `.tar` — not `.tar.xz`, not a vmdk.
+
+The download lands on the Windows side; WSL reads it under `/mnt/c`:
 
 ```bash
-docker import cEOS64-lab-4.32.0F.tar ceos:4.32.0F
+docker import /mnt/c/Users/hshih/Downloads/cEOS64-lab-4.33.9M.tar ceos:4.33.9M
 ```
 
-If your version differs, update the `image:` line in `topology.clab.yml` to match.
+Confirm it registered before deploying — a typo here surfaces later as a
+confusing containerlab hang rather than a clear "no such image":
+
+```bash
+docker images | grep ceos
+```
+
+If you use a different version, update the `image:` line in `topology.clab.yml`
+to match.
 
 ## 3. Deploy
 
