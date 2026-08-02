@@ -109,6 +109,33 @@ python auditor.py --test-connection -v
 
 Three green `OK` rows means Phase 0 and Phase 1 are done.
 
+## The lab keeps dying (WSL only)
+
+Two different causes, two different fixes.
+
+**It dies on its own between commands.** WSL2 shuts the VM down once no shell
+is attached, taking the Docker daemon and every node with it. The containers
+show `Exited (255)` and the logs show a perfectly clean boot, which makes it
+look like a cEOS problem. It is not. Add to `C:\Users\<you>\.wslconfig`:
+
+```ini
+[wsl2]
+vmIdleTimeout=-1
+```
+
+Then `wsl --shutdown` once to apply it. Keeping an Ubuntu terminal open works
+as a stopgap.
+
+**It dies after `wsl --shutdown` or a reboot.** Expected — containerlab sets no
+restart policy, so nodes stay stopped. Redeploy:
+
+```bash
+cd ~/netaudit && containerlab deploy -t topology.clab.yml --reconfigure
+```
+
+`--reconfigure` resets each node to its startup config, so any drift you
+introduced for testing is wiped too.
+
 ## Teardown
 
 ```bash
