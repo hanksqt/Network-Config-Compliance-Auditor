@@ -1,0 +1,113 @@
+# Scheduled compliance audit.
+#
+# This job audits the configs committed under backups/, which needs no network
+# access and no credentials. GitHub-hosted runners cannot reach a lab sitting
+# on a private management network, so a workflow that claimed to SSH to devices
+# from ubuntu-latest would be theatre. See the `live-audit` job below for the
+# self-hosted version, and README "Running this against real devices".
+name: Compliance
+
+on:
+  schedule:
+    # 07:00 UTC on weekdays -- a drift report waiting at the start of the day.
+    - cron: "0 7 * * 1-5"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backups/**"
+      - "golden.yaml"
+      - "inventory.yaml"
+      - "netauditor/**"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit committed configs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run compliance check
+        id: check
+        # Deliberately does not fail the step: the report has to be published
+        # before the job fails, or the summary is empty exactly when someone
+        # needs it. The failure is re-raised at the end.
+        continue-on-error: true
+        run: |
+          python auditor.py --check \
+            --report reports/compliance.md \
+            --no-color
+
+      - name: Write HTML report
+        continue-on-error: true
+        run: python auditor.py --check --report reports/compliance.html --no-color
+
+      - name: Publish report to job summary
+        if: always()
+        run: |
+          if [ -f reports/compliance.md ]; then
+            cat reports/compliance.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Compliance check did not produce a report" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail on drift
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "::error::One or more devices are non-compliant. See the job summary."
+          exit 1
+
+  # Auditing what the devices actually have right now requires a runner that
+  # can reach them. Enable by registering a self-hosted runner on the
+  # management network and setting the NETAUDIT_* secrets.
+  live-audit:
+    name: Audit live devices (self-hosted)
+    if: false # flip to `github.event_name == 'schedule'` once a runner exists
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Back up current configs
+        env:
+          NETAUDIT_LAB_USERNAME: ${{ secrets.NETAUDIT_LAB_USERNAME }}
+          NETAUDIT_LAB_PASSWORD: ${{ secrets.NETAUDIT_LAB_PASSWORD }}
+        run: python auditor.py --backup --no-color
+
+      # Audits what was just collected, not what happened to be committed
+      # last week. Checking stale backups would report green while a switch
+      # is misconfigured.
+      - name: Check compliance against live config
+        env:
+          NETAUDIT_LAB_USERNAME: ${{ secrets.NETAUDIT_LAB_USERNAME }}
+          NETAUDIT_LAB_PASSWORD: ${{ secrets.NETAUDIT_LAB_PASSWORD }}
+        run: python auditor.py --check --live --report reports/live.md --no-color
+
+      - name: Publish report to job summary
+        if: always()
+        run: cat reports/live.md >> "$GITHUB_STEP_SUMMARY" || true

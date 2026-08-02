@@ -71,16 +71,21 @@ def render_device_table(devices: Sequence[Device], console: Console) -> None:
     table.add_column("Backup command")
 
     for device in devices:
-        auth = "ssh key" if device.credentials.uses_key else "password"
-        if device.credentials.enable_secret:
-            auth += " + enable"
+        if device.credentials is None:
+            auth_cell = "[dim]not resolved[/]"
+        else:
+            auth = "ssh key" if device.credentials.uses_key else "password"
+            if device.credentials.enable_secret:
+                auth += " + enable"
+            auth_cell = f"{device.credentials.username} ({auth})"
+
         table.add_row(
             device.name,
             device.host,
             str(device.port),
             device.device_type,
             ", ".join(device.tags) or "-",
-            f"{device.credentials.username} ({auth})",
+            auth_cell,
             device.backup_command,
         )
 
