@@ -179,6 +179,42 @@ python auditor.py --check --live
 Do **not** `write memory` after that — a redeploy then wipes the drift and
 returns you to the compliant baseline.
 
+## Shutting down between demos
+
+The lab holds about 6 GB of RAM, so there is no reason to leave it running.
+Nothing in the repo depends on it: the scheduled audit reads the configs
+committed under `backups/`, so CI stays green with everything off.
+
+Stop it, keeping each node's saved config:
+
+```bash
+cd ~/netaudit && containerlab destroy -t topology.clab.yml
+```
+
+Then from Windows, to release the RAM:
+
+```bash
+wsl --shutdown
+```
+
+Bring it back:
+
+```bash
+wsl -d Ubuntu
+```
+
+```bash
+cd ~/netaudit && containerlab deploy -t topology.clab.yml
+```
+
+Give cEOS 60 to 90 seconds, then `python auditor.py --check --live` should show
+3/3 compliant.
+
+Do not add `--cleanup` to destroy, or `--reconfigure` to deploy. Both wipe the
+lab directory holding each node's startup-config, which takes the compliant
+baseline with it and leaves the lab failing its own audit until you re-apply
+the config above.
+
 ## Teardown
 
 ```bash
