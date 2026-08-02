@@ -27,17 +27,24 @@ class FakeConnection:
         *,
         outputs: dict[str, str] | None = None,
         raise_on_command: BaseException | None = None,
+        enable_error: BaseException | None = None,
         **params,
     ) -> None:
         self.params = params
         self.outputs = outputs or {}
         self.raise_on_command = raise_on_command
+        self.enable_error = enable_error
         self.enabled = False
         self.disconnected = False
         self.commands: list[str] = []
         self.read_timeouts: list[int | None] = []
 
+    def check_enable_mode(self) -> bool:
+        return self.enabled
+
     def enable(self) -> None:
+        if self.enable_error is not None:
+            raise self.enable_error
         self.enabled = True
 
     def send_command(self, command: str, read_timeout: int | None = None) -> str:
@@ -57,6 +64,7 @@ def make_connector(
     fail_times: int = 0,
     error: BaseException | None = None,
     raise_on_command: BaseException | None = None,
+    enable_error: BaseException | None = None,
 ):
     """Build a connector factory plus a list of the connections it handed out.
 
@@ -72,7 +80,10 @@ def make_connector(
             assert error is not None, "fail_times requires an error"
             raise error
         conn = FakeConnection(
-            outputs=outputs, raise_on_command=raise_on_command, **params
+            outputs=outputs,
+            raise_on_command=raise_on_command,
+            enable_error=enable_error,
+            **params,
         )
         created.append(conn)
         return conn
