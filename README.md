@@ -260,6 +260,20 @@ what came back, so a rejection is `COMMAND_FAILED` rather than a one-line file
 that Phase 3 would cheerfully audit against golden rules. Every layer that only
 checks *transport* success has this hole in it.
 
+**Why the lab's backups are committed, and why yours might not be.** `backups/`
+contains real captures from the Containerlab topology, including
+`username admin … secret sha512 $6$…`. That is deliberate: the hash is of
+`admin`, containerlab's documented default, salted, on a disposable container
+on an RFC1918 network that is destroyed with `containerlab destroy`. Nothing
+there is a secret, and committing it is what makes config history visible
+rather than theoretical — `git log backups/ceos-leaf1/` is the feature working.
+
+A production fleet is the opposite case. Running-configs carry credential
+hashes, SNMP communities, and pre-shared keys, and a real backup repo belongs
+somewhere private with restricted access — or `backups/` goes in `.gitignore`
+and the configs go to storage with an access policy. The tool doesn't care
+which; `--git-commit` is opt-in for exactly this reason.
+
 **Why one dead device can't fail the run.** `connect.collect()` never raises —
 it classifies the exception and returns a result. That is what makes the
 difference between a tool that audits 39 of 40 switches and tells you about the
