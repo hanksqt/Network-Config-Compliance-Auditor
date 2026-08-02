@@ -15,8 +15,9 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from . import __version__, inventory, report, runner
+from . import __version__, backup, gitstore, inventory, report, runner
 from .errors import AuditorError, CredentialError, InventoryError
+from .models import BackupStatus
 
 log = logging.getLogger("netauditor")
 
@@ -26,6 +27,7 @@ EXIT_CONFIG_ERROR = 2
 EXIT_INTERRUPTED = 130
 
 DEFAULT_INVENTORY = "inventory.yaml"
+DEFAULT_BACKUP_DIR = "backups"
 
 
 def _split_csv(values: Sequence[str] | None) -> list[str]:
@@ -49,6 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
             "examples:\n"
             "  python auditor.py --list-devices\n"
             "  python auditor.py --test-connection\n"
+            "  python auditor.py --backup\n"
+            "  python auditor.py --backup --git-commit\n"
             "  python auditor.py --test-connection --tag lab --json\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -67,6 +71,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--test-connection",
         action="store_true",
         help="SSH to each device and run its backup command; report reachability",
+    )
+    action.add_argument(
+        "-b",
+        "--backup",
+        action="store_true",
+        help="collect each device's running config and write it to --backup-dir",
     )
 
     source = parser.add_argument_group("device selection")
@@ -122,6 +132,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=2.0,
         metavar="SECONDS",
         help="delay between retries (default: 2.0)",
+    )
+
+    backup_group = parser.add_argument_group("backup (--backup only)")
+    backup_group.add_argument(
+        "--backup-dir",
+        default=DEFAULT_BACKUP_DIR,
+        metavar="PATH",
+        help=f"where configs are written (default: {DEFAULT_BACKUP_DIR})",
+    )
+    backup_group.add_argument(
+        "--force",
+        action="store_true",
+        help="write a new file even if the config is unchanged",
+    )
+    backup_group.add_argument(
+        "--git-commit",
+        action="store_true",
+        help="git-commit newly written backups, giving configs a change history",
     )
 
     out = parser.add_argument_group("output")
@@ -255,7 +283,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             report.render_device_table(devices, console)
         return EXIT_OK
 
-    # --test-connection
+    # --test-connection / --backup: both collect first.
     commands = _split_csv(args.command) or None
 
     try:
@@ -270,6 +298,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         err_console.print("[bold yellow]interrupted[/]")
         return EXIT_INTERRUPTED
 
+    if args.backup:
+        return _run_backup(args, results, console, err_console)
+
     if args.json:
         print(
             report.dump_json(
@@ -281,6 +312,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         report.render_summary(results, console)
 
     return EXIT_OK if all(r.ok for r in results) else EXIT_DEVICE_FAILURE
+
+
+def _run_backup(args, results, console, err_console) -> int:
+    """Write collected configs to disk, and optionally commit them."""
+    backups = backup.backup_all(results, args.backup_dir, force=args.force)
+
+    commit: str | None = None
+    commit_error: str | None = None
+    if args.git_commit:
+        written = backup.written_paths(backups)
+        if written:
+            names = [
+                b.device.name for b in backups if b.status is BackupStatus.WRITTEN
+            ]
+            try:
+                commit = gitstore.commit_paths(
+                    written,
+                    Path.cwd(),
+                    gitstore.default_message(len(written), names),
+                )
+            except (gitstore.GitError, OSError) as exc:
+                # The configs are safely on disk; a failed commit must not
+                # turn a successful backup into a failed run.
+                commit_error = str(exc)
+                log.warning("git commit failed: %s", exc)
+
+    if args.json:
+        payload = report.backups_to_json(backups)
+        payload["git"] = {"commit": commit, "error": commit_error}
+        print(report.dump_json(payload))
+    else:
+        report.render_backup_table(backups, console)
+        report.render_backup_summary(backups, console)
+        if commit:
+            console.print(f"[bold]Committed:[/] {commit}")
+        elif commit_error:
+            err_console.print(f"[bold yellow]git commit failed:[/] {commit_error}")
+
+    return EXIT_OK if all(b.ok for b in backups) else EXIT_DEVICE_FAILURE
 
 
 def run_cli() -> None:

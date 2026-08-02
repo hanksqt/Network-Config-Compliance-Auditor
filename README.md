@@ -4,12 +4,11 @@ SSH into your network devices, back up their running configuration, and audit
 each one against a golden baseline defined in YAML — so you find out a switch
 drifted from standard *before* an auditor does.
 
-> **Status: Phase 1 of 5 complete**, verified against three Arista cEOS nodes
-> running under Containerlab. Inventory, connectivity, credential
-> handling, and the CLI are built and tested. Config backup (Phase 2),
-> the compliance engine (Phase 3), HTML/Markdown reports (Phase 4), and the
-> scheduled compliance workflow (Phase 5) are next. See
-> [Roadmap](#roadmap).
+> **Status: Phases 1–2 of 5 complete**, verified against three Arista cEOS
+> nodes running under Containerlab. Inventory, connectivity, credential
+> handling, config backup, and the CLI are built and tested. The compliance
+> engine (Phase 3), HTML/Markdown reports (Phase 4), and the scheduled
+> compliance workflow (Phase 5) are next. See [Roadmap](#roadmap).
 
 ## The problem
 
@@ -42,20 +41,7 @@ Full setup in [lab/README.md](lab/README.md).
 
 ## Sample output
 
-Real output against the Containerlab topology above:
-
-```console
-$ python auditor.py --test-connection
-Connectivity check
-┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Device      ┃ Host            ┃ Platform   ┃ Status ┃ Time ┃ Detail               ┃
-┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
-│ ceos-spine1 │ 172.20.20.11:22 │ arista_eos │ OK     │ 0.5s │ 49 line(s) collected │
-│ ceos-leaf1  │ 172.20.20.12:22 │ arista_eos │ OK     │ 0.5s │ 47 line(s) collected │
-│ ceos-leaf2  │ 172.20.20.13:22 │ arista_eos │ OK     │ 0.5s │ 47 line(s) collected │
-└─────────────┴─────────────────┴────────────┴────────┴──────┴──────────────────────┘
-Summary: 3/3 reachable
-```
+![Connectivity check against three cEOS nodes](docs/phase1-connectivity.png)
 
 And a device that is down, to show the failure path (stop one node with
 `docker stop clab-netaudit-ceos-leaf2`):
@@ -84,6 +70,18 @@ Summary: 2/3 reachable, 1 failed
   error, not a confusing SSH failure ten minutes later
 - **Table or JSON output**, meaningful exit codes, and 101 unit tests that run
   without touching a network
+
+**Built (Phase 2)**
+
+- **Timestamped backups** to `backups/<device>/<UTC>.cfg`, written atomically so
+  a crash can't leave a truncated file where a config should be
+- **Unchanged configs aren't rewritten**, so the directory is a change history
+  rather than a cron log — volatile lines (`! Last configuration change at …`,
+  `ntp clock-period`) are ignored when comparing, or every run would look like drift
+- **Bad captures can't overwrite good history** — a config that's empty,
+  truncated, or an error string is `REJECTED` and nothing is written
+- **Optional `--git-commit`** to version config history; a failed commit never
+  turns a successful backup into a failed run
 
 **Planned** — see [Roadmap](#roadmap).
 
@@ -156,6 +154,24 @@ Connect to every device and run its backup command:
 python auditor.py --test-connection
 ```
 
+Back up every device's running config:
+
+```bash
+python auditor.py --backup
+```
+
+```console
+│ ceos-spine1 │ WRITTEN   │ 49 │ backups/ceos-spine1/20260802T032349Z.cfg │
+│ ceos-leaf1  │ UNCHANGED │ 47 │ no change since 20260802T032349Z.cfg     │
+Backups: 1 written, 1 unchanged
+```
+
+Version that history in git:
+
+```bash
+python auditor.py --backup --git-commit
+```
+
 Slice the fleet, tune concurrency, get machine-readable output:
 
 ```bash
@@ -204,6 +220,8 @@ netauditor/
   credentials.py        # env-var resolution
   connect.py            # Netmiko wrapper, error classification, retries
   runner.py             # thread pool across devices
+  backup.py             # timestamped writes, change detection, sanity checks
+  gitstore.py           # optional git commit of new backups
   report.py             # console tables + JSON
   models.py             # Device, DeviceResult, DeviceStatus
 inventory.yaml          # devices (no secrets)
@@ -263,7 +281,7 @@ honest fit for a blocking library.
 
 - [x] **Phase 0** — Containerlab topology, three cEOS nodes reachable over SSH
 - [x] **Phase 1** — inventory, credentials, connectivity, error handling, CLI
-- [ ] **Phase 2** — back up configs to `backups/<hostname>/<timestamp>.cfg`, optional git commit
+- [x] **Phase 2** — back up configs to `backups/<hostname>/<timestamp>.cfg`, optional git commit
 - [ ] **Phase 3** — compliance engine: `required` / `forbidden` / regex rules in YAML
 - [ ] **Phase 4** — HTML and Markdown reports alongside the console output
 - [ ] **Phase 5** — scheduled GitHub Actions compliance run that fails on drift

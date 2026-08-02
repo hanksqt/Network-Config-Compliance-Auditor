@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 
@@ -106,6 +107,49 @@ class Device:
 
         params.update(self.extra_args)
         return params
+
+
+class BackupStatus(str, Enum):
+    """Outcome of writing one device's config to disk."""
+
+    WRITTEN = "written"
+    #: Config is byte-identical to the previous capture, so nothing was written.
+    UNCHANGED = "unchanged"
+    #: Collection failed, so there was nothing to write.
+    SKIPPED = "skipped"
+    #: Collection succeeded but the config failed a sanity check.
+    REJECTED = "rejected"
+    #: The write itself failed (permissions, disk).
+    FAILED = "failed"
+
+    @property
+    def is_ok(self) -> bool:
+        return self in (BackupStatus.WRITTEN, BackupStatus.UNCHANGED)
+
+
+@dataclass
+class BackupResult:
+    """What happened when one device's config was written."""
+
+    device: Device
+    status: BackupStatus
+    path: Path | None = None
+    error: str | None = None
+    lines: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.status.is_ok
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "device": self.device.name,
+            "status": self.status.value,
+            "ok": self.ok,
+            "path": str(self.path) if self.path else None,
+            "lines": self.lines,
+            "error": self.error,
+        }
 
 
 @dataclass
