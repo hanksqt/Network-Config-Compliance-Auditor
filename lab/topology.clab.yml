@@ -9,8 +9,8 @@
 # setup. Cisco IOS under containerlab needs vrnetlab plus a licensed IOSv/CSR
 # image, which is a much longer road to the same result.
 #
-# Import the image once before deploying:
-#   docker import cEOS64-lab-4.33.9M.tar ceos:4.33.9M
+# Import the image once before deploying (Docker handles the xz itself):
+#   docker import cEOS64-lab-4.33.9M.tar.xz ceos:4.33.9M
 #
 # 4.33.9M is the newest maintenance ("M") release of the 4.33 train — the most
 # bug fixes behind it, and a train containerlab has been run against heavily.
