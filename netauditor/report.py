@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from .models import Device, DeviceResult, DeviceStatus
+from .models import BackupResult, BackupStatus, Device, DeviceResult, DeviceStatus
 
 #: status -> (label, rich style)
 STATUS_STYLE: dict[DeviceStatus, tuple[str, str]] = {
@@ -111,6 +111,82 @@ def render_results_table(
         )
 
     console.print(table)
+
+
+#: backup status -> (label, rich style)
+BACKUP_STYLE: dict[BackupStatus, tuple[str, str]] = {
+    BackupStatus.WRITTEN: ("WRITTEN", "bold green"),
+    BackupStatus.UNCHANGED: ("UNCHANGED", "dim"),
+    BackupStatus.SKIPPED: ("SKIPPED", "bold yellow"),
+    BackupStatus.REJECTED: ("REJECTED", "bold magenta"),
+    BackupStatus.FAILED: ("FAILED", "bold red"),
+}
+
+
+def render_backup_table(backups: Sequence[BackupResult], console: Console) -> None:
+    table = Table(title="Config backup", title_justify="left")
+    table.add_column("Device", style="bold")
+    table.add_column("Status")
+    table.add_column("Lines", justify="right")
+    table.add_column("File / reason")
+
+    for backup in backups:
+        label, style = BACKUP_STYLE.get(
+            backup.status, (backup.status.value.upper(), "bold red")
+        )
+        if backup.status is BackupStatus.WRITTEN and backup.path:
+            detail = str(backup.path)
+        elif backup.status is BackupStatus.UNCHANGED:
+            detail = f"no change since {backup.path.name}" if backup.path else "no change"
+        else:
+            detail = backup.error or ""
+
+        table.add_row(
+            backup.device.name,
+            Text(label, style=style),
+            str(backup.lines) if backup.lines else "-",
+            detail,
+        )
+
+    console.print(table)
+
+
+def render_backup_summary(backups: Sequence[BackupResult], console: Console) -> None:
+    counts: dict[BackupStatus, int] = {}
+    for backup in backups:
+        counts[backup.status] = counts.get(backup.status, 0) + 1
+
+    failed = sum(
+        n for status, n in counts.items() if not status.is_ok
+    )
+    parts = [
+        f"{counts.get(BackupStatus.WRITTEN, 0)} written",
+        f"{counts.get(BackupStatus.UNCHANGED, 0)} unchanged",
+    ]
+    if failed:
+        parts.append(f"{failed} failed")
+
+    console.print(
+        Text.assemble(
+            ("Backups: ", "bold"),
+            (", ".join(parts), "bold red" if failed else "bold green"),
+        )
+    )
+
+
+def backups_to_json(backups: Sequence[BackupResult]) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for backup in backups:
+        counts[backup.status.value] = counts.get(backup.status.value, 0) + 1
+    return {
+        "summary": {
+            "total": len(backups),
+            "ok": sum(1 for b in backups if b.ok),
+            "failed": sum(1 for b in backups if not b.ok),
+            "by_status": counts,
+        },
+        "backups": [b.to_dict() for b in backups],
+    }
 
 
 def render_summary(results: Sequence[DeviceResult], console: Console) -> None:
