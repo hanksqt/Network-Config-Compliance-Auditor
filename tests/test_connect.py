@@ -58,6 +58,88 @@ class TestClassifyException:
         assert reason.strip()
 
 
+class TestOutputValidation:
+    """A device that answers "% Invalid input" replied fine at the SSH layer.
+
+    Without this check that error string gets stored as if it were a config --
+    which is how a compliance tool ends up auditing an error message.
+    """
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "% Invalid input (privileged mode required)",
+            "% Incomplete command",
+            "% Ambiguous command:  'sh ru'",
+            "% Authorization failed",
+            "Invalid input detected at '^' marker.",
+            "syntax error, expecting <command>",
+        ],
+    )
+    def test_device_rejections_are_caught(self, reply: str) -> None:
+        assert connect.output_problem("show running-config", reply) is not None
+
+    def test_empty_output_is_caught(self) -> None:
+        assert connect.output_problem("show running-config", "   \n  ") is not None
+
+    def test_real_config_passes(self) -> None:
+        config = "\n".join(["! device: ceos-spine1", "hostname ceos-spine1", "ip routing"])
+        assert connect.output_problem("show running-config", config) is None
+
+    def test_long_config_mentioning_a_marker_is_not_a_false_positive(self) -> None:
+        """A banner quoting one of these phrases must not fail the collection."""
+        config = "banner motd\nunauthorized access is denied\n" + "\n".join(
+            f"interface Ethernet{n}" for n in range(50)
+        )
+        assert connect.output_problem("show running-config", config) is None
+
+    def test_rejection_downgrades_the_result(self, device) -> None:
+        connector = make_connector(
+            outputs={"show running-config": "% Invalid input (privileged mode required)"}
+        )
+        result = connect.collect(device, ["show running-config"], connector=connector)
+
+        assert result.status is DeviceStatus.COMMAND_FAILED
+        assert not result.ok
+        assert "rejected" in result.error
+
+    def test_rejection_is_not_retried(self, device) -> None:
+        connector = make_connector(outputs={"show running-config": "% Invalid input"})
+        result = connect.collect(
+            device, ["show running-config"], retries=4, retry_delay=0, connector=connector
+        )
+        assert result.attempts == 1
+
+
+class TestEnableMode:
+    def test_enable_is_attempted_without_a_secret(self, device) -> None:
+        """A privilege-15 EOS/IOS account enters enable with no password, and
+        without it `show running-config` is rejected."""
+        connector = make_connector()
+        connect.collect(device, ["show running-config"], connector=connector)
+        assert connector.created[0].enabled is True
+
+    def test_platforms_without_enable_still_collect(self, device) -> None:
+        """linux/junos have no enable mode; that must not fail the run."""
+        linux = replace(device, device_type="linux")
+        connector = make_connector(enable_error=AttributeError("no enable mode"))
+
+        result = connect.collect(linux, ["show version"], connector=connector)
+        assert result.ok
+
+    def test_configured_secret_that_fails_is_surfaced(self, device) -> None:
+        """If the inventory sets a secret, failing to use it is a real error."""
+        with_secret = replace(
+            device, credentials=replace(device.credentials, enable_secret="s3cret")
+        )
+        connector = make_connector(
+            enable_error=NetmikoAuthenticationException("enable rejected")
+        )
+
+        result = connect.collect(with_secret, ["show version"], connector=connector)
+        assert result.status is DeviceStatus.AUTH_FAILED
+
+
 class TestCollectSuccess:
     def test_returns_command_output(self, device) -> None:
         connector = make_connector(outputs={"show version": "vEOS 4.32"})
@@ -80,11 +162,6 @@ class TestCollectSuccess:
         connector = make_connector()
         connect.collect(device, ["show version"], connector=connector)
         assert connector.created[0].disconnected
-
-    def test_no_enable_without_a_secret(self, device) -> None:
-        connector = make_connector()
-        connect.collect(device, ["show version"], connector=connector)
-        assert connector.created[0].enabled is False
 
     def test_enable_when_a_secret_is_set(self, device) -> None:
         with_secret = replace(

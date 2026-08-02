@@ -79,6 +79,69 @@ def classify_exception(exc: BaseException) -> tuple[DeviceStatus, str]:
     return DeviceStatus.ERROR, f"{exc.__class__.__name__}: {first_line}"
 
 
+#: Markers that mean the device rejected the command instead of answering it.
+DEVICE_ERROR_MARKERS = (
+    "invalid input",
+    "incomplete command",
+    "ambiguous command",
+    "permission denied",
+    "authorization failed",
+    "invalid command",
+    "unknown command",
+    "syntax error",
+)
+
+#: A rejection is short; a real config is not. Only treat a marker as an error
+#: when the whole reply is small enough to plausibly *be* the error, so a
+#: config with "syntax error" in a banner is not misread as a failure.
+MAX_ERROR_REPLY_LINES = 5
+
+
+def output_problem(command: str, output: str) -> str | None:
+    """Return a reason if the device rejected ``command``, else ``None``.
+
+    Netmiko only reports transport failures. A device that answers "% Invalid
+    input" has replied perfectly well at the SSH layer, so without this check
+    an error string gets stored as if it were a configuration.
+    """
+    text = output.strip()
+    if not text:
+        return f"{command!r} returned no output"
+
+    lines = text.splitlines()
+    if len(lines) <= MAX_ERROR_REPLY_LINES:
+        first = lines[0].strip()
+        lowered = first.lower()
+        if first.startswith("%") or any(m in lowered for m in DEVICE_ERROR_MARKERS):
+            return f"device rejected {command!r}: {first}"
+    return None
+
+
+def _enter_enable_mode(connection: Any, device: Device) -> None:
+    """Get into privileged mode before running show commands.
+
+    Netmiko only auto-enables when a secret is set, but on EOS and IOS a
+    privilege-15 account typically enters enable with no password at all --
+    and without it `show running-config` is rejected with
+    "% Invalid input (privileged mode required)".
+
+    Platforms with no enable mode (linux, junos) raise here; that is not an
+    error, so it is swallowed unless the inventory explicitly configured a
+    secret, in which case failing to use it is worth surfacing.
+    """
+    try:
+        if not connection.check_enable_mode():
+            connection.enable()
+    except Exception:
+        if device.credentials.enable_secret:
+            raise
+        log.debug(
+            "%s: no enable mode available, continuing in user exec",
+            device.name,
+            exc_info=True,
+        )
+
+
 def _run_once(
     device: Device,
     commands: Sequence[str],
@@ -91,8 +154,7 @@ def _run_once(
     outputs: dict[str, str] = {}
     connection = connector(**params)
     try:
-        if device.credentials.enable_secret:
-            connection.enable()
+        _enter_enable_mode(connection, device)
         for command in commands:
             log.debug("%s: running %r", device.name, command)
             outputs[command] = connection.send_command(
@@ -152,10 +214,19 @@ def collect(
                 attempts=attempt,
             )
         else:
+            # The SSH layer succeeded; the device may still have rejected the
+            # command. Not retried -- a rejected command stays rejected.
+            problem = next(
+                (p for c, o in outputs.items() if (p := output_problem(c, o))),
+                None,
+            )
             return DeviceResult(
                 device=device,
-                status=DeviceStatus.SUCCESS,
+                status=(
+                    DeviceStatus.COMMAND_FAILED if problem else DeviceStatus.SUCCESS
+                ),
                 outputs=outputs,
+                error=problem,
                 duration_s=time.monotonic() - started,
                 attempts=attempt,
             )

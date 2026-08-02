@@ -4,7 +4,8 @@ SSH into your network devices, back up their running configuration, and audit
 each one against a golden baseline defined in YAML — so you find out a switch
 drifted from standard *before* an auditor does.
 
-> **Status: Phase 1 of 5 complete.** Inventory, connectivity, credential
+> **Status: Phase 1 of 5 complete**, verified against three Arista cEOS nodes
+> running under Containerlab. Inventory, connectivity, credential
 > handling, and the CLI are built and tested. Config backup (Phase 2),
 > the compliance engine (Phase 3), HTML/Markdown reports (Phase 4), and the
 > scheduled compliance workflow (Phase 5) are next. See
@@ -41,19 +42,26 @@ Full setup in [lab/README.md](lab/README.md).
 
 ## Sample output
 
-*Illustrative — this is the shape of a run with one device down. Swap in a real
-screenshot of your own lab before showing this to anyone.*
+Real output against the Containerlab topology above:
 
 ```console
 $ python auditor.py --test-connection
 Connectivity check
-┌─────────────┬─────────────────┬────────────┬─────────────┬───────┬──────────────────────────────────────┐
-│ Device      │ Host            │ Platform   │ Status      │  Time │ Detail                               │
-├─────────────┼─────────────────┼────────────┼─────────────┼───────┼──────────────────────────────────────┤
-│ ceos-spine1 │ 172.20.20.11:22 │ arista_eos │ OK          │  1.4s │ 187 line(s) collected                │
-│ ceos-leaf1  │ 172.20.20.12:22 │ arista_eos │ OK          │  1.5s │ 172 line(s) collected                │
+┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Device      ┃ Host            ┃ Platform   ┃ Status ┃ Time ┃ Detail               ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
+│ ceos-spine1 │ 172.20.20.11:22 │ arista_eos │ OK     │ 0.5s │ 49 line(s) collected │
+│ ceos-leaf1  │ 172.20.20.12:22 │ arista_eos │ OK     │ 0.5s │ 47 line(s) collected │
+│ ceos-leaf2  │ 172.20.20.13:22 │ arista_eos │ OK     │ 0.5s │ 47 line(s) collected │
+└─────────────┴─────────────────┴────────────┴────────┴──────┴──────────────────────┘
+Summary: 3/3 reachable
+```
+
+And a device that is down, to show the failure path (stop one node with
+`docker stop clab-netaudit-ceos-leaf2`):
+
+```console
 │ ceos-leaf2  │ 172.20.20.13:22 │ arista_eos │ UNREACHABLE │ 10.0s │ could not open TCP session to device │
-└─────────────┴─────────────────┴────────────┴─────────────┴───────┴──────────────────────────────────────┘
 Summary: 2/3 reachable, 1 failed
 ```
 
@@ -225,6 +233,15 @@ different credentials needs no code change and no secret in git. Secrets are
 also marked `repr=False` on the dataclass, so they can't leak into a traceback
 or a debug log.
 
+**Why a successful SSH session isn't a successful collection.** The first run
+against real cEOS returned `OK` for all three devices — and the "config" it
+collected was `% Invalid input (privileged mode required)`. Netmiko had done its
+job perfectly: it connected, sent the command, and returned the answer. The
+device just happened to answer with a refusal. `output_problem()` now inspects
+what came back, so a rejection is `COMMAND_FAILED` rather than a one-line file
+that Phase 3 would cheerfully audit against golden rules. Every layer that only
+checks *transport* success has this hole in it.
+
 **Why one dead device can't fail the run.** `connect.collect()` never raises —
 it classifies the exception and returns a result. That is what makes the
 difference between a tool that audits 39 of 40 switches and tells you about the
@@ -244,7 +261,7 @@ honest fit for a blocking library.
 
 ## Roadmap
 
-- [ ] **Phase 0** — Containerlab topology (written; deploy it and verify SSH by hand)
+- [x] **Phase 0** — Containerlab topology, three cEOS nodes reachable over SSH
 - [x] **Phase 1** — inventory, credentials, connectivity, error handling, CLI
 - [ ] **Phase 2** — back up configs to `backups/<hostname>/<timestamp>.cfg`, optional git commit
 - [ ] **Phase 3** — compliance engine: `required` / `forbidden` / regex rules in YAML
