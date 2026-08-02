@@ -1,0 +1,64 @@
+# Device inventory for the compliance auditor.
+#
+# This file is committed to git, so it contains NO secrets. Each device names a
+# credential *profile*; the actual username/password come from environment
+# variables (see .env.example).
+#
+#   credentials: lab  ->  NETAUDIT_LAB_USERNAME / NETAUDIT_LAB_PASSWORD
+#   credentials: omitted -> NETAUDIT_USERNAME / NETAUDIT_PASSWORD
+
+defaults:
+  device_type: arista_eos   # Netmiko platform name
+  port: 22
+  credentials: lab
+  conn_timeout: 10
+  read_timeout: 30
+
+devices:
+  # --- Containerlab topology (see lab/topology.clab.yml) --------------------
+  - name: ceos-spine1
+    host: 172.20.20.11
+    tags: [lab, spine]
+
+  - name: ceos-leaf1
+    host: 172.20.20.12
+    tags: [lab, leaf]
+
+  - name: ceos-leaf2
+    host: 172.20.20.13
+    tags: [lab, leaf]
+
+  # --- Examples of the other supported knobs -------------------------------
+  # Cisco DevNet always-on sandbox. Zero install, but it is a shared public
+  # box: it is slow, occasionally down, and the credentials rotate. Check
+  # https://developer.cisco.com/site/sandbox/ for the current details, put them
+  # in NETAUDIT_DEVNET_USERNAME / NETAUDIT_DEVNET_PASSWORD, then uncomment.
+  #
+  # - name: devnet-csr
+  #   host: sandbox-iosxe-latest-1.cisco.com
+  #   device_type: cisco_xe
+  #   credentials: devnet
+  #   conn_timeout: 30       # public sandbox is slow to answer
+  #   read_timeout: 90
+  #   tags: [sandbox]
+
+  # SSH key auth instead of a password. The path is not a secret, so it can
+  # live here; the key itself stays out of the repo (see .gitignore).
+  #
+  # - name: edge-rtr1
+  #   host: 10.0.0.1
+  #   device_type: cisco_ios
+  #   credentials: campus
+  #   key_file: ~/.ssh/netops_id_rsa
+  #   tags: [prod, edge]
+
+  # Anything Netmiko accepts that the schema does not model can be passed
+  # straight through with extra_args.
+  #
+  # - name: legacy-sw1
+  #   host: 10.0.0.9
+  #   device_type: cisco_ios
+  #   backup_command: show running-config all
+  #   extra_args:
+  #     global_delay_factor: 2
+  #     fast_cli: false

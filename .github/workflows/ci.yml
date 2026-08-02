@@ -1,0 +1,41 @@
+# Unit tests only — no devices are contacted here.
+#
+# The scheduled compliance run against real devices lands in Phase 5 as a
+# separate workflow, because it needs repository secrets and a reachable lab.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Check inventory.yaml parses
+        # Catches a broken inventory before it reaches a scheduled run.
+        env:
+          NETAUDIT_LAB_USERNAME: ci-syntax-check
+          NETAUDIT_LAB_PASSWORD: ci-syntax-check
+        run: python auditor.py --list-devices --no-color

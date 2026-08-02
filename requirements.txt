@@ -1,0 +1,5 @@
+# Runtime dependencies
+netmiko>=4.3.0        # SSH transport + per-vendor prompt/paging handling
+PyYAML>=6.0           # inventory.yaml and (Phase 3) golden rule files
+rich>=13.7.0          # colorized console tables
+python-dotenv>=1.0.0  # optional .env loading for local development

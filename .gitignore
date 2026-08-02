@@ -1,0 +1,40 @@
+# --- Secrets: never commit credentials -------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Tool output -----------------------------------------------------------
+# Backups are intentionally NOT ignored: config history is the point of the
+# tool. Reports are regenerated on every run, so they are.
+reports/
+*.log
+
+# --- Lab (containerlab writes per-node state next to the topology) ----------
+clab-*/
+.clab.*
+*.clab.yml.bak
+
+# --- Editors / OS ----------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

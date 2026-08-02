@@ -1,0 +1,6 @@
+# Normalize line endings: the repo is authored on Windows but CI runs on Linux.
+* text=auto eol=lf
+
+# Device configs are compared line-by-line in Phase 3 — never let git rewrite
+# their line endings or diff them as binary.
+*.cfg text eol=lf

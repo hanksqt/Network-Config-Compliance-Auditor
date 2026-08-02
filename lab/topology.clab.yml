@@ -1,0 +1,44 @@
+# Containerlab topology: one spine, two leaves, all reachable over the
+# management network so the auditor can SSH to them.
+#
+#   sudo containerlab deploy -t lab/topology.clab.yml
+#   sudo containerlab destroy -t lab/topology.clab.yml --cleanup
+#
+# Arista cEOS is used because the image is a free download (an Arista account
+# is required) and Netmiko's `arista_eos` driver handles it without extra
+# setup. Cisco IOS under containerlab needs vrnetlab plus a licensed IOSv/CSR
+# image, which is a much longer road to the same result.
+#
+# Import the image once before deploying:
+#   docker import cEOS64-lab-4.32.0F.tar ceos:4.32.0F
+#
+# No `startup-config` is set on purpose: containerlab's built-in cEOS config
+# already assigns the management IP, enables SSH, and creates a privilege-15
+# admin account, which is everything the auditor needs. Confirm the account
+# before writing it into .env (see lab/README.md).
+
+name: netaudit
+
+mgmt:
+  network: netaudit-mgmt
+  ipv4-subnet: 172.20.20.0/24
+
+topology:
+  kinds:
+    ceos:
+      image: ceos:4.32.0F
+
+  nodes:
+    ceos-spine1:
+      kind: ceos
+      mgmt-ipv4: 172.20.20.11
+    ceos-leaf1:
+      kind: ceos
+      mgmt-ipv4: 172.20.20.12
+    ceos-leaf2:
+      kind: ceos
+      mgmt-ipv4: 172.20.20.13
+
+  links:
+    - endpoints: ["ceos-spine1:eth1", "ceos-leaf1:eth1"]
+    - endpoints: ["ceos-spine1:eth2", "ceos-leaf2:eth1"]
