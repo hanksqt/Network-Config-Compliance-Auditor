@@ -130,11 +130,54 @@ as a stopgap.
 restart policy, so nodes stay stopped. Redeploy:
 
 ```bash
-cd ~/netaudit && containerlab deploy -t topology.clab.yml --reconfigure
+cd ~/netaudit && containerlab deploy -t topology.clab.yml
 ```
 
-`--reconfigure` resets each node to its startup config, so any drift you
-introduced for testing is wiped too.
+Without `--reconfigure` this keeps each node's saved config. Containerlab
+stores it under `clab-netaudit/<node>/flash/`, so anything you `write memory`
+survives a redeploy — including the compliant baseline below. Add
+`--reconfigure` only when you want a factory reset.
+
+## Making the lab compliant
+
+Out of the box, cEOS fails three of the rules in `golden.yaml`: no login
+banner anywhere, and `no ip routing` on the spine. That is useful for seeing
+the auditor find something, but you probably want a compliant baseline to
+drift *from*. On each node:
+
+```
+enable
+configure
+banner motd
+*** Authorized access only. Activity may be monitored and reported. ***
+EOF
+end
+write memory
+```
+
+And on `ceos-spine1` only:
+
+```
+configure
+ip routing
+end
+write memory
+```
+
+## Demonstrating drift detection
+
+With a compliant baseline saved, introduce a violation and watch it get caught:
+
+```bash
+docker exec clab-netaudit-ceos-leaf1 Cli -p 15 -c $'configure\nsnmp-server community public ro\nend'
+```
+
+```bash
+python auditor.py --check --live
+```
+
+Do **not** `write memory` after that — a redeploy then wipes the drift and
+returns you to the compliant baseline.
 
 ## Teardown
 

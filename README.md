@@ -227,7 +227,10 @@ Export the report — extension picks the format:
 python auditor.py --check --report reports/compliance.html
 ```
 
-See [docs/sample-report.md](docs/sample-report.md) for real output.
+[docs/sample-report.md](docs/sample-report.md) is real output from a run where
+the lab had drifted — a missing login banner on all three nodes, `no ip routing`
+on a spine, and a default SNMP community. The committed configs are compliant
+now, which is why the badge is green; re-injecting drift takes one command.
 
 Slice the fleet, tune concurrency, get machine-readable output:
 
